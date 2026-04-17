@@ -32,6 +32,17 @@ export const redirectToOriginalUrl = async (
 
     if (cachedUrl) {
       console.log("Cache HIT");
+
+      // Increment click count
+      await prisma.url.update({
+        where: { shortCode },
+        data: {
+          clickCount: {
+            increment: 1,
+          },
+        },
+      });
+
       return res.redirect(cachedUrl);
     }
 
@@ -46,9 +57,19 @@ export const redirectToOriginalUrl = async (
       return res.status(404).json({ message: "URL not found" });
     }
 
+    // Increment click count
+    await prisma.url.update({
+      where: { shortCode },
+      data: {
+        clickCount: {
+          increment: 1,
+        },
+      },
+    });
+
     // 3. Cache set
     await redisClient.set(shortCode, url.originalUrl, {
-      EX: 60 * 60, // 1 hour
+      EX: 60 * 60,
     });
 
     return res.redirect(url.originalUrl);

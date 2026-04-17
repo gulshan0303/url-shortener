@@ -1,6 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import { prisma } from "./config/prisma";
+import { rateLimiter } from "./middlewares/rateLimiter";
 dotenv.config();
 
 const app = express();
@@ -11,6 +12,7 @@ import urlRoutes from "./routes/url.routes";
 
 //middlewares
 app.use("/api", urlRoutes);
+app.use(rateLimiter);
 
 app.get("/", (req, res) => {
   res.send("URL Shortener API running 🚀");
