@@ -1,39 +1,23 @@
 import { prisma } from "../config/prisma";
-
-// simple generator (abhi ke liye)
-function generateShortCode(length = 6): string {
-  const chars =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
-
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-
-  return result;
-}
+import { encodeBase62 } from "../utils/base62";
 
 export const createShortUrlService = async (originalUrl: string) => {
-  let shortCode = generateShortCode();
-
-  // ensure uniqueness
-  let existing = await prisma.url.findUnique({
-    where: { shortCode },
-  });
-
-  while (existing) {
-    shortCode = generateShortCode();
-    existing = await prisma.url.findUnique({
-      where: { shortCode },
-    });
-  }
-
-  await prisma.url.create({
+  // 1. Create with temporary unique value
+  const newUrl = await prisma.url.create({
     data: {
-      shortCode,
       originalUrl,
+      shortCode: "temp_" + Date.now(), // temporary unique
     },
   });
 
-  return `http://localhost:3000/api/${shortCode}`;
+  // 2. Generate Base62
+  const shortCode = encodeBase62(Number(newUrl.id));
+
+  // 3. Update safely
+  const updated = await prisma.url.update({
+    where: { id: newUrl.id },
+    data: { shortCode },
+  });
+
+  return `http://localhost:3000/api/${updated.shortCode}`;
 };
