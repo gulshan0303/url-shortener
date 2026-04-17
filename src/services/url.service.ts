@@ -1,19 +1,43 @@
 import { prisma } from "../config/prisma";
 import { encodeBase62 } from "../utils/base62";
 
-export const createShortUrlService = async (originalUrl: string) => {
-  // 1. Create with temporary unique value
+export const createShortUrlService = async (
+  originalUrl: string,
+  customCode?: string,
+  expiresIn?: number,
+) => {
+  const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000) : null;
+
+  if (customCode) {
+    const existing = await prisma.url.findUnique({
+      where: { shortCode: customCode },
+    });
+
+    if (existing) {
+      throw new Error("CUSTOM_CODE_TAKEN");
+    }
+
+    const newUrl = await prisma.url.create({
+      data: {
+        originalUrl,
+        shortCode: customCode,
+        expiresAt,
+      },
+    });
+
+    return `http://localhost:3000/api/${newUrl.shortCode}`;
+  }
+
   const newUrl = await prisma.url.create({
     data: {
       originalUrl,
-      shortCode: "temp_" + Date.now(), // temporary unique
+      shortCode: "temp_" + Date.now(),
+      expiresAt,
     },
   });
 
-  // 2. Generate Base62
-  const shortCode = encodeBase62(Number(newUrl.id));
+  const shortCode = encodeBase62(newUrl.id);
 
-  // 3. Update safely
   const updated = await prisma.url.update({
     where: { id: newUrl.id },
     data: { shortCode },

@@ -5,17 +5,22 @@ import { redisClient } from "../config/redis";
 
 export const createShortUrl = async (req: Request, res: Response) => {
   try {
-    const { url } = req.body;
+    const { url, customCode, expiresIn } = req.body;
 
     if (!url) {
       return res.status(400).json({ message: "URL is required" });
     }
 
-    const shortUrl = await createShortUrlService(url);
+    const shortUrl = await createShortUrlService(url, customCode, expiresIn);
 
     return res.status(201).json({ shortUrl });
-  } catch (error) {
-    console.error(error);
+  } catch (error: any) {
+    if (error.message === "CUSTOM_CODE_TAKEN") {
+      return res.status(400).json({
+        message: "Custom short URL already taken",
+      });
+    }
+
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -27,28 +32,25 @@ export const redirectToOriginalUrl = async (
   try {
     const { shortCode } = req.params;
 
-    // 1. Redis check
-    const cachedUrl = await redisClient.get(shortCode);
+    // Redis check
+    const cachedData = await redisClient.get(shortCode);
 
-    if (cachedUrl) {
-      console.log("Cache HIT");
+    if (cachedData) {
+      const parsed = JSON.parse(cachedData);
 
-      // Increment click count
-      await prisma.url.update({
-        where: { shortCode },
-        data: {
-          clickCount: {
-            increment: 1,
-          },
-        },
-      });
+      // 🔥 Expiry check (VERY IMPORTANT)
+      if (parsed.expiresAt && new Date() > new Date(parsed.expiresAt)) {
+        return res.status(410).json({
+          message: "This link has expired",
+        });
+      }
 
-      return res.redirect(cachedUrl);
+      return res.redirect(parsed.originalUrl);
     }
 
     console.log("Cache MISS");
 
-    // 2. DB fallback
+    // 🔥 DB fallback
     const url = await prisma.url.findUnique({
       where: { shortCode },
     });
@@ -57,20 +59,24 @@ export const redirectToOriginalUrl = async (
       return res.status(404).json({ message: "URL not found" });
     }
 
-    // Increment click count
-    await prisma.url.update({
-      where: { shortCode },
-      data: {
-        clickCount: {
-          increment: 1,
-        },
-      },
-    });
+    // 🔥 Expiry check
+    if (url.expiresAt && new Date() > url.expiresAt) {
+      return res.status(410).json({
+        message: "This link has expired",
+      });
+    }
 
-    // 3. Cache set
-    await redisClient.set(shortCode, url.originalUrl, {
-      EX: 60 * 60,
-    });
+    // 🔥 Cache FULL object (not just URL)
+    await redisClient.set(
+      shortCode,
+      JSON.stringify({
+        originalUrl: url.originalUrl,
+        expiresAt: url.expiresAt,
+      }),
+      {
+        EX: 60 * 60,
+      },
+    );
 
     return res.redirect(url.originalUrl);
   } catch (error) {
